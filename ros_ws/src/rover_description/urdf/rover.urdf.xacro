@@ -1,0 +1,198 @@
+<?xml version="1.0"?>
+<!--
+  SCX24 rover model.
+
+  Vehicle dimensions arrive as xacro arguments supplied from
+  config/vehicle.cfg by the launch file. Each is required: a missing value
+  aborts the build instead of silently falling back to a stale number.
+
+  Frame convention (REP-103): x forward, y left, z up.
+  base_link sits at the rear-axle center, the same reference point as
+  rover::BicycleModel, so simulated and predicted poses compare directly.
+-->
+<robot name="scx24_rover" xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <!-- ===== Inputs from config/vehicle.cfg =====
+       xacro requires a default, so each defaults to "" (never a valid
+       measurement) and is then checked: a missing value aborts the build
+       instead of silently falling back to a stale number. -->
+  <xacro:arg name="wheelbase_meters"           default=""/>
+  <xacro:arg name="front_track_width_meters"   default=""/>
+  <xacro:arg name="rear_track_width_meters"    default=""/>
+  <xacro:arg name="tire_diameter_meters"       default=""/>
+  <xacro:arg name="max_steering_angle_radians" default=""/>
+  <xacro:arg name="vehicle_mass_kilograms"     default=""/>
+  <xacro:arg name="front_wheel_mass_kilograms" default=""/>
+  <xacro:arg name="rear_wheel_mass_kilograms"  default=""/>
+
+  <xacro:property name="wheelbase"         value="$(arg wheelbase_meters)"/>
+  <xacro:property name="front_track_width" value="$(arg front_track_width_meters)"/>
+  <xacro:property name="rear_track_width"  value="$(arg rear_track_width_meters)"/>
+  <xacro:property name="tire_diameter"     value="$(arg tire_diameter_meters)"/>
+  <xacro:property name="max_steer"         value="$(arg max_steering_angle_radians)"/>
+  <xacro:property name="vehicle_mass"      value="$(arg vehicle_mass_kilograms)"/>
+  <xacro:property name="front_wheel_mass"  value="$(arg front_wheel_mass_kilograms)"/>
+  <xacro:property name="rear_wheel_mass"   value="$(arg rear_wheel_mass_kilograms)"/>
+
+  <xacro:macro name="require" params="value name">
+    <xacro:if value="${value == ''}">
+      ${xacro.fatal('Required argument ' + name + ' was not supplied (it comes from config/vehicle.cfg via the launch file).')}
+    </xacro:if>
+  </xacro:macro>
+
+  <xacro:require value="${wheelbase}"         name="wheelbase_meters"/>
+  <xacro:require value="${front_track_width}" name="front_track_width_meters"/>
+  <xacro:require value="${rear_track_width}"  name="rear_track_width_meters"/>
+  <xacro:require value="${tire_diameter}"     name="tire_diameter_meters"/>
+  <xacro:require value="${max_steer}"         name="max_steering_angle_radians"/>
+  <xacro:require value="${vehicle_mass}"      name="vehicle_mass_kilograms"/>
+  <xacro:require value="${front_wheel_mass}"  name="front_wheel_mass_kilograms"/>
+  <xacro:require value="${rear_wheel_mass}"   name="rear_wheel_mass_kilograms"/>
+
+  <!-- ===== Modeling choices not in vehicle.cfg ===== -->
+  <xacro:property name="wheel_radius"   value="${tire_diameter / 2}"/>
+  <xacro:property name="wheel_width"    value="0.017"/>  <!-- measured tread width -->
+  <xacro:property name="knuckle_mass"   value="0.002"/>  <!-- nominal: Gazebo discards massless links -->
+  <xacro:property name="chassis_height" value="0.030"/>  <!-- ESTIMATE -->
+  <xacro:property name="chassis_length" value="${wheelbase + tire_diameter}"/>
+  <!-- Fits between the wheels with a 2 mm gap on each side. The chassis is
+       a single box spanning the whole vehicle length, so it must clear
+       BOTH axles; since front and rear track widths now genuinely differ,
+       the narrower of the two (min()) governs, whichever axle that ends
+       up being if either measurement changes. -->
+  <xacro:property name="chassis_width"
+                   value="${min(front_track_width, rear_track_width) - wheel_width - 0.004}"/>
+  <!-- Chassis carries whatever mass the wheels and knuckles don't. -->
+  <xacro:property name="chassis_mass"
+                   value="${vehicle_mass - 2*front_wheel_mass - 2*rear_wheel_mass - 2*knuckle_mass}"/>
+
+  <xacro:macro name="require_positive" params="value name">
+    <xacro:if value="${not value > 0}">
+      ${xacro.fatal(name + ' is not positive (got ' + str(value) + '): vehicle_mass_kilograms is too small for the front/rear wheel and knuckle masses supplied in config/vehicle.cfg.')}
+    </xacro:if>
+  </xacro:macro>
+
+  <!-- Guards against a cfg where the wheels (plus knuckles) already
+       account for the whole vehicle mass or more, which would otherwise
+       silently produce a zero or negative chassis mass. -->
+  <xacro:require_positive value="${chassis_mass}" name="chassis_mass"/>
+
+  <!-- ===== Ackermann steering limit per wheel =====
+       max_steer is the bicycle-model angle (a virtual center wheel).
+       At that angle the rear-axle center turns on radius L / tan(max_steer),
+       and the INNER front wheel, on a tighter circle, must steer further.
+       Joint limits use the inner-wheel angle so they never clip a legal
+       command. Uses front_track_width, not rear: this is about the
+       spacing between the front steering pivots, a front-axle-only
+       concept (only the front wheels steer). -->
+  <xacro:property name="min_turn_radius" value="${wheelbase / tan(max_steer)}"/>
+  <xacro:property name="wheel_steer_max" value="${atan(wheelbase / (min_turn_radius - front_track_width/2))}"/>
+
+  <!-- ===== Materials (RViz colors) ===== -->
+  <material name="body_blue"><color rgba="0.15 0.35 0.60 1"/></material>
+  <material name="tire_black"><color rgba="0.10 0.10 0.10 1"/></material>
+  <!-- Debug-only: a wheel is a plain solid of revolution, so a spinning
+       wheel_joint produces no visible change without some asymmetric mark
+       on it. This stripe is purely cosmetic (visual only, no effect on
+       collision or inertia) and exists so wheel rotation is visible in
+       RViz instead of only verifiable via /joint_states. -->
+  <material name="stripe_yellow"><color rgba="1.0 0.85 0.0 1"/></material>
+
+  <!-- ===== Inertia formulas for solid shapes ===== -->
+  <xacro:macro name="box_inertia" params="m x y z">
+    <inertia ixx="${m*(y*y + z*z)/12}" ixy="0" ixz="0"
+             iyy="${m*(x*x + z*z)/12}" iyz="0"
+             izz="${m*(x*x + y*y)/12}"/>
+  </xacro:macro>
+
+  <!-- Cylinder whose axis is its own z. -->
+  <xacro:macro name="cylinder_inertia" params="m r h">
+    <inertia ixx="${m*(3*r*r + h*h)/12}" ixy="0" ixz="0"
+             iyy="${m*(3*r*r + h*h)/12}" iyz="0"
+             izz="${m*r*r/2}"/>
+  </xacro:macro>
+
+  <!-- ===== One wheel: a cylinder spinning about the y axis =====
+       URDF cylinders point along z; rolling them 90 degrees about x
+       lays them on their side so they spin about y. -->
+  <xacro:macro name="wheel" params="name parent x y mass">
+    <link name="${name}_wheel">
+      <visual>
+        <origin rpy="${pi/2} 0 0"/>
+        <geometry><cylinder radius="${wheel_radius}" length="${wheel_width}"/></geometry>
+        <material name="tire_black"/>
+      </visual>
+      <!-- Radial stripe, hub to near-rim, slightly wider than the tire so
+           it's visible from both sides. Lives in the same link as the tire
+           cylinder, so it revolves with it as wheel_joint turns. -->
+      <visual>
+        <origin xyz="0 0 ${wheel_radius*0.45}"/>
+        <geometry><box size="0.010 ${wheel_width + 0.006} ${wheel_radius*0.9}"/></geometry>
+        <material name="stripe_yellow"/>
+      </visual>
+      <collision>
+        <origin rpy="${pi/2} 0 0"/>
+        <geometry><cylinder radius="${wheel_radius}" length="${wheel_width}"/></geometry>
+      </collision>
+      <inertial>
+        <origin rpy="${pi/2} 0 0"/>
+        <mass value="${mass}"/>
+        <xacro:cylinder_inertia m="${mass}" r="${wheel_radius}" h="${wheel_width}"/>
+      </inertial>
+    </link>
+    <joint name="${name}_wheel_joint" type="continuous">
+      <parent link="${parent}"/>
+      <child link="${name}_wheel"/>
+      <origin xyz="${x} ${y} 0"/>
+      <axis xyz="0 1 0"/>
+    </joint>
+  </xacro:macro>
+
+  <!-- ===== One front corner: steering knuckle + wheel ===== -->
+  <xacro:macro name="front_corner" params="side y">
+    <link name="front_${side}_steering">
+      <inertial>
+        <mass value="${knuckle_mass}"/>
+        <inertia ixx="1e-7" ixy="0" ixz="0" iyy="1e-7" iyz="0" izz="1e-7"/>
+      </inertial>
+    </link>
+    <joint name="front_${side}_steering_joint" type="revolute">
+      <parent link="base_link"/>
+      <child link="front_${side}_steering"/>
+      <origin xyz="${wheelbase} ${y} 0"/>
+      <axis xyz="0 0 1"/>
+      <limit lower="${-wheel_steer_max}" upper="${wheel_steer_max}" effort="1.0" velocity="5.0"/>
+    </joint>
+    <xacro:wheel name="front_${side}" parent="front_${side}_steering" x="0" y="0" mass="${front_wheel_mass}"/>
+  </xacro:macro>
+
+  <!-- ===== The robot ===== -->
+  <!-- Massless root at the rear-axle center (KDL warns on a massive root). -->
+  <link name="base_link"/>
+
+  <link name="chassis">
+    <visual>
+      <geometry><box size="${chassis_length} ${chassis_width} ${chassis_height}"/></geometry>
+      <material name="body_blue"/>
+    </visual>
+    <collision>
+      <geometry><box size="${chassis_length} ${chassis_width} ${chassis_height}"/></geometry>
+    </collision>
+    <inertial>
+      <mass value="${chassis_mass}"/>
+      <xacro:box_inertia m="${chassis_mass}" x="${chassis_length}" y="${chassis_width}" z="${chassis_height}"/>
+    </inertial>
+  </link>
+  <!-- Chassis box centered between the axles, bottom face at axle height. -->
+  <joint name="chassis_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="chassis"/>
+    <origin xyz="${wheelbase/2} 0 ${chassis_height/2}"/>
+  </joint>
+
+  <xacro:wheel name="rear_left"  parent="base_link" x="0" y="${rear_track_width/2}"  mass="${rear_wheel_mass}"/>
+  <xacro:wheel name="rear_right" parent="base_link" x="0" y="${-rear_track_width/2}" mass="${rear_wheel_mass}"/>
+  <xacro:front_corner side="left"  y="${front_track_width/2}"/>
+  <xacro:front_corner side="right" y="${-front_track_width/2}"/>
+
+</robot>

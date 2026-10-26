@@ -1,0 +1,95 @@
+<?xml version="1.0"?>
+<!--
+  Minimal flat world for driving the SCX24 rover.
+
+  Deliberately bare: one ground plane, one light, the three system plugins
+  a spawnable/controllable world needs, plus the IMU system for the rover's
+  gyro (the EKF's input). No physics tuning beyond the step
+  size below - everything else is left at gz-sim's defaults.
+-->
+<sdf version="1.9">
+  <world name="flat">
+
+    <!-- 1 ms step: matches gz-sim's own shipped wheeled-vehicle example
+         (share/gz/gz-sim8/worlds/ackermann_steering.sdf uses this same
+         1 ms / real_time_factor 1.0 pairing). Small, light wheels (54 mm
+         diameter, ~300 g vehicle) need a short step for the contact/
+         friction solver to stay stable; 1 ms is the standard starting
+         point for that and still simulates comfortably faster than a
+         human can react to teleop commands. real_time_factor 1.0 caps it
+         at real time rather than letting it run as fast as the CPU allows,
+         which matters for a teleop/driving demo (an operator issuing
+         cmd_vel commands wants 1 simulated second per 1 real second).
+    -->
+    <physics name="1ms" type="ignored">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+    </physics>
+
+    <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics"/>
+    <!-- Provides the /world/flat/create service that `ros2 run ros_gz_sim
+         create` (used by sim.launch.py to spawn the rover) depends on. -->
+    <plugin filename="gz-sim-user-commands-system" name="gz::sim::systems::UserCommands"/>
+    <!-- Publishes scene/pose info so the Gazebo GUI (and RViz, later) can
+         see what's in the world. -->
+    <plugin filename="gz-sim-scene-broadcaster-system" name="gz::sim::systems::SceneBroadcaster"/>
+    <!-- Runs the model's <sensor type="imu"> (rover.gazebo.xacro): /rover/imu/raw. -->
+    <plugin filename="gz-sim-imu-system" name="gz::sim::systems::Imu"/>
+
+    <light type="directional" name="sun">
+      <cast_shadows>true</cast_shadows>
+      <pose>0 0 10 0 0 0</pose>
+      <diffuse>1 1 1 1</diffuse>
+      <specular>0.5 0.5 0.5 1</specular>
+      <attenuation>
+        <range>1000</range>
+        <constant>0.9</constant>
+        <linear>0.01</linear>
+        <quadratic>0.001</quadratic>
+      </attenuation>
+      <direction>-0.5 0.1 -0.9</direction>
+    </light>
+
+    <model name="ground_plane">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <plane>
+              <normal>0 0 1</normal>
+              <size>100 100</size>
+            </plane>
+          </geometry>
+          <!-- Explicit rather than relying on the physics engine's default:
+               mu = mu2 = 1.0 is a plausible dry-floor value (see the
+               matching wheel friction choice in urdf/rover.gazebo.xacro
+               for the full reasoning) and keeps the ground from silently
+               becoming the limiting factor on traction instead of the
+               tires. -->
+          <surface>
+            <friction>
+              <ode>
+                <mu>1.0</mu>
+                <mu2>1.0</mu2>
+              </ode>
+            </friction>
+          </surface>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <plane>
+              <normal>0 0 1</normal>
+              <size>100 100</size>
+            </plane>
+          </geometry>
+          <material>
+            <ambient>0.8 0.8 0.8 1</ambient>
+            <diffuse>0.8 0.8 0.8 1</diffuse>
+            <specular>0.8 0.8 0.8 1</specular>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+  </world>
+</sdf>

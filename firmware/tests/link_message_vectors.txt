@@ -1,0 +1,71 @@
+# Shared message vectors for the Pi link (firmware/tests/test_link_protocol.c,
+# tools/test_rover_link.py), from Python struct and link_protocol.h. Hex payloads.
+#   units     <cps> <units>
+#   drive     <payload> <result> [<speed_cps> <steer_pct> <steer_valid> <arm>]
+#   hello_ack <build_flags> <reset_flags> <imu_ok> <imu_who> <state_ms> <status_ms> <payload>
+#   state     <17 fields in LinkStateMessage order> <payload>
+#   status    <23 fields + 20 counters in LinkStatusMessage order> <payload>
+units 0 0
+units -24 0
+units 24 0
+units -25 0
+units 25 0
+units -26 0
+units 26 0
+units -74 0
+units 74 0
+units -75 0
+units 75 0
+units -76 0
+units 76 0
+units -974 0
+units 974 0
+units -975 0
+units 975 0
+units -976 0
+units 976 0
+units -999 0
+units 999 0
+units -1000 -20
+units 1000 20
+units -1001 -20
+units 1001 20
+units -1024 -20
+units 1024 20
+units -1025 -20
+units 1025 20
+units -1026 -21
+units 1026 21
+units -2500 -50
+units 2500 50
+units -4999 -100
+units 4999 100
+units -5000 -100
+units 5000 100
+drive 00000000 OK 0 0 0 0
+drive 00000002 OK 0 0 0 1
+drive c409e201 OK 2500 -30 1 0
+drive 78ec6401 OK -5000 100 1 0
+drive 88139c00 OK 5000 -100 0 0
+drive 89130000 OUT_OF_RANGE
+drive 77ec0000 OUT_OF_RANGE
+drive 00006501 OUT_OF_RANGE
+drive 00009b00 OUT_OF_RANGE
+drive ff7f0000 OUT_OF_RANGE
+drive 00800000 OUT_OF_RANGE
+drive e8030002 ARM_WITH_SPEED
+drive ffff0003 ARM_WITH_SPEED
+drive 00000004 BAD_FLAGS
+drive 00000080 BAD_FLAGS
+drive 000000ff BAD_FLAGS
+drive - BAD_LENGTH
+drive 000000 BAD_LENGTH
+drive 0000000000 BAD_LENGTH
+hello_ack 0 36 1 71 10 100 0100240147e803881332000a64
+hello_ack 15 255 0 0 10 100 010fff0000e803881332000a64
+hello_ack 300 999 1 1000 999 1000 01ffff01ffe80388133200ffff
+state 123456 -1513 2450 1 7 -60 -310 -160 -2250 1680 81520 10 1 308 1 1 42 40e2010017faffff92090107c4ffffffcafeffff60ffffff36f7ffff90060000703e01000a013401112a
+state 4294967295 -2147483648 -32768 6 255 2147483647 -2147483648 0 327670 -327680 1 0 2 -480 3 0 255 ffffffff00000080008006ffffffff7f0000008000000000f6ff04000000fbff01000000000220fe03ff
+state 5 2147483647 40000 300 256 0 0 0 0 0 0 300 0 40000 20 20 300 05000000ffffff7fff7fff00000000000000000000000000000000000000000000000000ff00ff7fff2c
+status 100100 2500 307 -30 1350 1 1 1 0 0 1 1 1 104 36 7920 3315 -272 2134 2137 670 513 128 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 04870100c4093301e2460501010100000101016824f01ef30cf0fe560859089e02010280000100000002000000030000000400000005000000060000000700000008000000090000000a0000000b0000000c0000000d0000000e0000000f0000001000000011000000120000001300000014000000
+status 4294967295 40000 -40000 -200 70000 300 3 2 7 0 4 0 7 255 255 70000 5100000 -40000 0 65536 65535 70000 0 4294967295 4294967295 4294967295 4294967295 4294967295 4294967295 4294967295 4294967295 4294967295 4294967295 4294967295 4294967295 4294967295 4294967295 4294967295 4294967295 4294967295 4294967295 4294967295 4294967295 ffffffffff7f008080ffffff03020700040007ffffffffffff00800000ffffffffffff0000ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff

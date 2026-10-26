@@ -1,0 +1,19 @@
+# The Pi's low-battery shutdown (tools/battery_watch.py, installed as a root-owned copy).
+# Install / uninstall: docs/ros-bridge.md, Low-battery shutdown.
+[Unit]
+Description=Rover low-battery shutdown watcher
+After=systemd-tmpfiles-setup.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/rover-battery-watch
+EnvironmentFile=-/etc/default/rover-battery-watch
+Restart=always
+RestartSec=5
+NoNewPrivileges=yes
+ProtectSystem=full
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

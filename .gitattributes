@@ -1,0 +1,2 @@
+# Shell scripts run on Linux (the Pi, WSL from /mnt/c): never CRLF.
+*.sh text eol=lf

@@ -1,0 +1,6 @@
+# Bench overrides for the shutdown watcher: copy to /etc/default/rover-battery-watch, set
+# THRESHOLD_MV just above the pack's resting voltage (the battery line in /diagnostics or the
+# teleop status line), restart the service. Remove the file and restart afterwards.
+THRESHOLD_MV=7900
+HOLD_S=10
+ACTION=log

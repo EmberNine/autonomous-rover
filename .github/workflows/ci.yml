@@ -1,0 +1,98 @@
+name: CI
+
+on: push
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libeigen3-dev
+
+      - name: Configure
+        run: cmake -S . -B build -DROVER_WARNINGS_AS_ERRORS=ON
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+  python-tests:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      # Ubuntu's own packages: the same pytest (7.4) and numpy (1.26) as the
+      # WSL 24.04 dev environment. No ROS: rover_bridge's node tests skip
+      # without rclpy; its conversions and link tests are ROS-free.
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-pytest python3-numpy
+
+      - name: Test
+        run: python3 -m pytest -q tools ros_ws/src/rover_description/test ros_ws/src/rover_bridge/test
+
+  # The ROS-dependent tests: rover_bridge's node tests (a fake board on a pty) and rover_ekf's
+  # node test, which python-tests skips without rclpy. rover_gazebo is left out (it needs ros_gz).
+  ros-tests:
+    runs-on: ubuntu-24.04
+    container: ros:jazzy
+    env:
+      ROS_DOMAIN_ID: 87
+      ROS_AUTOMATIC_DISCOVERY_RANGE: LOCALHOST
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          apt-get update
+          apt-get install -y libeigen3-dev python3-pytest python3-serial python3-numpy \
+            ros-jazzy-ament-cmake-pytest
+
+      - name: Build
+        run: |
+          source /opt/ros/jazzy/setup.bash
+          colcon build --base-paths ros_ws/src --packages-skip rover_gazebo
+
+      # colcon test doesn't fail on test failures; colcon test-result does.
+      - name: Test
+        run: |
+          source /opt/ros/jazzy/setup.bash
+          colcon test --base-paths ros_ws/src --packages-skip rover_gazebo --event-handlers console_cohesion+
+          colcon test-result --verbose
+
+  # Run telemetry against a real Postgres (tools/test_telemetry_db.py): the schema, the replace on
+  # re-import, the transaction and the page's queries. python-tests skips it (no database).
+  telemetry-db:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: rover
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 2s --health-timeout 5s --health-retries 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-pytest python3-psycopg
+
+      # With TELEMETRY_TEST_DB set the module can't skip: a missing psycopg or database fails.
+      - name: Test
+        env:
+          TELEMETRY_TEST_DB: host=localhost user=postgres password=postgres dbname=rover
+        run: python3 -m pytest -q -rs tools/test_telemetry_db.py

@@ -1,0 +1,63 @@
+# ros_gz_bridge topic map for the SCX24 rover.
+#
+# Every GZ topic name here is an EXPLICIT override set in
+# urdf/rover.gazebo.xacro's plugin blocks (<topic>/<odom_topic> etc.), not
+# a plugin default - so these strings must match that file exactly, and
+# none of them depend on the Gazebo model name or world name. That was a
+# deliberate fix: an earlier pass assumed some of these were implicitly
+# namespaced under /model/scx24_rover/ (or, for joint_state, under
+# /world/<world_name>/model/scx24_rover/), which turned out to be wrong
+# once checked against gz-sim 8's actual plugin source - see the xacro
+# file's comments for the corrected reasoning per plugin. Making every
+# topic here an absolute path that the xacro sets explicitly means this
+# file has nothing to keep in sync with worlds/flat.sdf's <world name>.
+#
+# Field names and the ROS_TO_GZ/GZ_TO_ROS/BIDIRECTIONAL direction values
+# are exactly what ros_gz_bridge's bridge_node config-file parser expects
+# (confirmed via `strings` on libros_gz_bridge.so).
+
+# Drive/steer commands: ROS -> Gazebo.
+- ros_topic_name: "/cmd_vel"
+  gz_topic_name: "/cmd_vel"
+  ros_type_name: "geometry_msgs/msg/Twist"
+  gz_type_name: "gz.msgs.Twist"
+  direction: ROS_TO_GZ
+
+# AckermannSteering's own odometry: dead-reckoned from commanded wheel
+# motion, not a ground-truth measurement.
+- ros_topic_name: "/odometry/wheel_command"
+  gz_topic_name: "/odometry/wheel_command"
+  ros_type_name: "nav_msgs/msg/Odometry"
+  gz_type_name: "gz.msgs.Odometry"
+  direction: GZ_TO_ROS
+
+# OdometryPublisher's odometry: exact pose/twist from the physics engine.
+- ros_topic_name: "/odometry/ground_truth"
+  gz_topic_name: "/odometry/ground_truth"
+  ros_type_name: "nav_msgs/msg/Odometry"
+  gz_type_name: "gz.msgs.Odometry"
+  direction: GZ_TO_ROS
+
+# Sim clock, so ROS nodes using use_sim_time see Gazebo's time, not the
+# wall clock.
+- ros_topic_name: "/clock"
+  gz_topic_name: "/clock"
+  ros_type_name: "rosgraph_msgs/msg/Clock"
+  gz_type_name: "gz.msgs.Clock"
+  direction: GZ_TO_ROS
+
+# Joint states from JointStatePublisher. Note the GZ side is singular
+# ("joint_state") while the ROS side uses the standard ROS convention
+# ("joint_states", plural).
+- ros_topic_name: "/joint_states"
+  gz_topic_name: "/joint_state"
+  ros_type_name: "sensor_msgs/msg/JointState"
+  gz_type_name: "gz.msgs.Model"
+  direction: GZ_TO_ROS
+
+# The sim's gyro (rover.gazebo.xacro), same topic and type as the real bridge's feed; the EKF reads it.
+- ros_topic_name: "/rover/imu/raw"
+  gz_topic_name: "/rover/imu/raw"
+  ros_type_name: "sensor_msgs/msg/Imu"
+  gz_type_name: "gz.msgs.IMU"
+  direction: GZ_TO_ROS

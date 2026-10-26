@@ -1,0 +1,244 @@
+<?xml version="1.0"?>
+<!--
+  Gazebo-specific additions on top of rover_description's plain URDF.
+
+  Everything ROS/robot-shape-related (links, joints, inertias, the 8
+  required xacro args) already lives in rover_description/urdf/rover.urdf.xacro
+  and is reused here via <xacro:include>, unmodified. This file adds only
+  what Gazebo needs to actually simulate and drive the thing: per-wheel
+  friction and the three gz-sim system plugins.
+
+  No vehicle dimension is hardcoded below - every plugin parameter that
+  corresponds to a physical measurement reuses the xacro properties
+  (wheelbase, front_track_width, rear_track_width, wheel_radius, max_steer)
+  that rover_description already computed from the same 8 xacro args, so
+  there is exactly one place (config/vehicle.cfg) that ever states these
+  numbers.
+
+  Plugin element names below were NOT taken from memory: they were read
+  directly off the installed gz-sim 8.15.0 plugin binaries under
+  /opt/ros/jazzy/opt/gz_sim_vendor/lib/ (via `strings`), cross-checked
+  against the shipped example world
+  /opt/ros/jazzy/opt/gz_sim_vendor/share/gz/gz-sim8/worlds/ackermann_steering.sdf.
+-->
+<robot name="scx24_rover" xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <xacro:include filename="$(find rover_description)/urdf/rover.urdf.xacro"/>
+
+  <!-- ===== Tire friction =====
+       mu = mu2 = 1.0, isotropic (no <fdir1> needed since both slots
+       match): a plausible rubber-on-hard-floor coefficient. Measured
+       rubber/dry-floor friction commonly falls around 0.6-1.0; picking
+       the upper end of that range gives this light (302 g) crawler
+       confident traction for early driving tests without inventing a
+       number nobody measured.
+
+       Mechanism: the classic <gazebo reference="LINK"><mu1>/<mu2></gazebo>
+       shorthand. This is NOT one of the three system plugins, so it isn't
+       covered by the plugin-binary check above, but it was still verified
+       rather than assumed: `strings` on the installed
+       libsdformat14.so.14.9.0 (the library that converts this URDF to SDF
+       when Gazebo loads it) shows "mu1"/"mu2" as tokens distinct from
+       plain SDF's own <mu>/<mu2> friction elements, which only makes
+       sense as this URDF-conversion shorthand still being supported in
+       this version. -->
+  <xacro:macro name="wheel_friction" params="link_name">
+    <gazebo reference="${link_name}">
+      <mu1>1.0</mu1>
+      <mu2>1.0</mu2>
+    </gazebo>
+  </xacro:macro>
+  <xacro:wheel_friction link_name="rear_left_wheel"/>
+  <xacro:wheel_friction link_name="rear_right_wheel"/>
+  <xacro:wheel_friction link_name="front_left_wheel"/>
+  <xacro:wheel_friction link_name="front_right_wheel"/>
+
+  <!-- ===== AckermannSteering's steering_limit: a translated value, not
+       max_steer directly =====
+       gz-sim 8's AckermannSteering (src/systems/ackermann_steering/
+       AckermannSteering.cc) clamps the commanded turning radius at
+       minimumTurningRadius = wheel_base / sin(steering_limit) - the
+       radius to the FRONT-axle midpoint at full lock - then feeds that
+       radius into its per-wheel atan(wheel_base / (radius +/- kingpin/2))
+       formulas, which assume a REAR-axle-midpoint radius. Every other
+       part of this project (config/vehicle.cfg's own convention,
+       rover::BicycleModel, and rover_description's own wheel_steer_max
+       joint-limit formula above) uses wheel_base / tan(max_steer) - the
+       standard bicycle-model rear-axle radius. Since sin(x) < tan(x) for
+       0 < x < pi/2, feeding max_steer to steering_limit directly makes
+       the plugin's floor a *larger* (more conservative) radius than the
+       correct one, silently understeering both front wheels at full
+       lock - confirmed by reproducing a real measured discrepancy
+       (0.257693/0.222578 rad actual vs. 0.265975/0.228767 rad intended).
+
+       Solving sin(plugin_steering_limit) = tan(max_steer) makes the
+       plugin's floor exactly wheel_base / tan(max_steer), matching
+       everywhere else. asin() requires its argument in [-1, 1], i.e.
+       tan(max_steer) <= 1, i.e. max_steer < pi/4 - guarded below before
+       the computation, since an out-of-domain asin() would otherwise
+       fail with a confusing error from deep inside xacro's expression
+       evaluator instead of ours.
+
+       With this fix, the inner wheel's target angle at true full lock
+       becomes bit-for-bit identical to its own URDF <limit upper> (both
+       are atan(wheel_base/(wheel_base/tan(max_steer) - front_track_width/2)),
+       computed from the same cfg-sourced inputs) - zero margin, by
+       design: rover_description's own comment on wheel_steer_max already
+       says the joint limit is set to exactly the full-lock inner angle
+       so it never clips a legal command. Any float-precision excess
+       between the two independently-computed values (Python's xacro
+       evaluator here vs. the plugin's own C++ atan/sin) would be on the
+       order of 1e-16 rad, and the joint's hard limit holds regardless of
+       which side of it a difference that small would fall on. -->
+  <xacro:if value="${max_steer >= pi/4}">
+    ${xacro.fatal('max_steering_angle_radians must be less than pi/4 (got ' + str(max_steer) + ') for the AckermannSteering plugin_steering_limit translation (asin(tan(max_steer))) to stay in domain.')}
+  </xacro:if>
+  <xacro:property name="plugin_steering_limit" value="${asin(tan(max_steer))}"/>
+
+  <gazebo>
+    <!-- Drives all four wheel joints - the real 1/24 SCX24 crawler drives
+         both axles from one motor - and steers the two front knuckles.
+         Joint names below are exactly what rover_description's `wheel`
+         and `front_corner` macros emit.
+
+         steering_limit is plugin_steering_limit, NOT max_steering_angle_radians
+         directly and NOT the 0.2655 rad per-wheel URDF joint limit either -
+         see the dedicated comment above this <gazebo> block for why a
+         translated value is needed (gz-sim 8's clamp formula uses sin()
+         where this project's own bicycle-model convention uses tan()).
+
+         kingpin_width is front_track_width: the front_corner macro puts
+         each wheel's hub exactly on its steering knuckle's pivot axis (no
+         caster/kingpin offset is modeled), so the knuckle-pivot spacing
+         and the front wheel-rolling spacing are the same physical
+         distance in this model - both are simply the front track width.
+
+         wheel_separation is rear_track_width, not front: AckermannSteering
+         only accepts a single wheel_separation value and uses it for BOTH
+         axles' wheel-speed differential math (it has no separate
+         front/rear wheel-track parameter). rear_track_width is used
+         because the rear axle is this whole project's reference point
+         (base_link sits at the rear-axle center, matching
+         rover::BicycleModel). The front axle's 2 mm wider track is an
+         accepted simplification of the plugin's own single-value model,
+         not something we can express more precisely to it.
+
+         Command topic: explicit <topic>/cmd_vel</topic>, not a bare
+         reliance on defaults. Read from the actual gz-sim 8 source
+         (src/systems/ackermann_steering/AckermannSteering.cc): this
+         plugin checks <topic> FIRST (used exactly as given - a leading
+         slash makes it absolute) and only falls back to <sub_topic>
+         (which it manually concatenates as "/model/<name>/" + value,
+         still namespaced) or, with neither present, a hardcoded default
+         of "/model/<name>/cmd_vel". So the un-namespaced "/cmd_vel" string
+         a plugin-binary `strings` scan turns up is only the suffix used
+         in that default concatenation, not a standalone default - an
+         earlier pass over this file mis-stated this. <topic> is the only
+         one of the two parameters that can produce a truly absolute,
+         non-namespaced topic, which is what we want for a single-robot
+         sim. Full GZ topic: /cmd_vel.
+
+         odom_topic/tf_topic ARE overridden, and given as absolute paths
+         (leading slash) for the same reason: the source shows a custom
+         odom_topic/tf_topic value is used EXACTLY as typed, with no
+         "/model/<name>/" prefix ever applied to it (that prefix only
+         appears in the hardcoded default). AckermannSteering's own
+         default ("/model/<name>/odometry") is identical to
+         OdometryPublisher's default below, so leaving both at default
+         would make them collide; naming this one "wheel_command" also
+         says what it actually is: odometry dead-reckoned from commanded
+         wheel motion, not a ground-truth measurement. Full GZ topics:
+         /odometry/wheel_command and /odometry/wheel_command/tf. -->
+    <plugin filename="gz-sim-ackermann-steering-system"
+            name="gz::sim::systems::AckermannSteering">
+      <left_joint>front_left_wheel_joint</left_joint>
+      <left_joint>rear_left_wheel_joint</left_joint>
+      <right_joint>front_right_wheel_joint</right_joint>
+      <right_joint>rear_right_wheel_joint</right_joint>
+      <left_steering_joint>front_left_steering_joint</left_steering_joint>
+      <right_steering_joint>front_right_steering_joint</right_steering_joint>
+      <kingpin_width>${front_track_width}</kingpin_width>
+      <wheel_base>${wheelbase}</wheel_base>
+      <wheel_separation>${rear_track_width}</wheel_separation>
+      <wheel_radius>${wheel_radius}</wheel_radius>
+      <steering_limit>${plugin_steering_limit}</steering_limit>
+      <!-- Steering joints are position-controlled through a P gain (velocity
+           command = gain * angle error). The plugin's default 1.0 is a ~1 s time
+           constant: a half circle at 0.05 m/s turned 3.03 rad instead of pi
+           while the EKF's /rover/steering already said full lock. 10 is ~0.1 s,
+           close to the real servo's. -->
+      <steer_p_gain>10.0</steer_p_gain>
+      <topic>/cmd_vel</topic>
+      <odom_publish_frequency>50</odom_publish_frequency>
+      <odom_topic>/odometry/wheel_command</odom_topic>
+      <tf_topic>/odometry/wheel_command/tf</tf_topic>
+      <frame_id>odom</frame_id>
+      <child_frame_id>base_link</child_frame_id>
+    </plugin>
+
+    <!-- Ground-truth pose/twist read straight from the physics engine -
+         not estimated from wheel motion at all, unlike the plugin above.
+         dimensions=2 because this is a ground vehicle (no need to track
+         Z/roll/pitch). odom_topic/tf_topic are absolute for the same
+         reason as above (gz-sim8's OdometryPublisher.cc also uses a
+         custom odom_topic/tf_topic exactly as typed, no auto-prefix) and
+         distinct from AckermannSteering's above so the two never collide
+         - this genuinely is a different signal: a real robot would never
+         have this one (it isn't derived from any sensor), only the
+         wheel_command estimate above would exist. Full GZ topics:
+         /odometry/ground_truth and /odometry/ground_truth/tf. -->
+    <plugin filename="gz-sim-odometry-publisher-system"
+            name="gz::sim::systems::OdometryPublisher">
+      <dimensions>2</dimensions>
+      <odom_frame>odom</odom_frame>
+      <robot_base_frame>base_link</robot_base_frame>
+      <child_frame_id>base_link</child_frame_id>
+      <odom_publish_frequency>50</odom_publish_frequency>
+      <odom_topic>/odometry/ground_truth</odom_topic>
+      <tf_topic>/odometry/ground_truth/tf</tf_topic>
+    </plugin>
+
+    <!-- This DOES have a <topic> override (a prior pass over this file
+         said it had no configurable elements at all - wrong; re-verified
+         against gz-sim8's actual source,
+         src/systems/joint_state_publisher/JointStatePublisher.cc). Its
+         default is topicFromScopedName(...) + "/joint_state", which
+         resolves to "/world/<world_name>/model/<model_name>/joint_state"
+         - i.e. it would depend on worlds/flat.sdf's <world name="flat">
+         matching whatever bridge.yaml hardcodes, two places that could
+         drift out of sync. Overriding <topic> directly sidesteps that
+         dependency entirely rather than needing a world name anywhere.
+         Full GZ topic: /joint_state. -->
+    <plugin filename="gz-sim-joint-state-publisher-system"
+            name="gz::sim::systems::JointStatePublisher">
+      <topic>/joint_state</topic>
+    </plugin>
+  </gazebo>
+
+  <!-- The gyro the EKF reads, as the real ICM-42688 feed: 100 Hz on
+       /rover/imu/raw (bridge.yaml), Z up, at the rear-axle centre. Yaw-rate
+       noise sigma 3e-4 rad/s is the 2026-10-04 static log at 100 Hz
+       (docs/kalman-filter.md, R ~ 9e-8), and a constant bias of 0.0026 rad/s
+       (the size seen on the 2026-10-25 bench) so the EKF's 2 s seed has
+       something to find. gz-sensors picks the bias's sign at random per run. -->
+  <gazebo reference="base_link">
+    <sensor name="imu" type="imu">
+      <always_on>true</always_on>
+      <update_rate>100</update_rate>
+      <topic>/rover/imu/raw</topic>
+      <imu>
+        <angular_velocity>
+          <z>
+            <noise type="gaussian">
+              <mean>0</mean>
+              <stddev>3e-4</stddev>
+              <bias_mean>0.0026</bias_mean>
+              <bias_stddev>0</bias_stddev>
+            </noise>
+          </z>
+        </angular_velocity>
+      </imu>
+    </sensor>
+  </gazebo>
+
+</robot>

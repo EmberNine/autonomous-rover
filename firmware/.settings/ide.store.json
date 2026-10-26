@@ -1,0 +1,10 @@
+{
+  "source": {
+    "sourceType": "STM32CubeMX"
+  },
+  "board": "NUCLEO-L432KC",
+  "device": "STM32L432KCU3",
+  "core": "Cortex-M4",
+  "order": 0,
+  "toolchain": "GCC"
+}

@@ -1,0 +1,82 @@
+# The rover bridge on the Pi (docs/ros-bridge.md). From the repo root:
+#   docker compose -f ros_ws/docker/compose.yaml up -d --build
+#   docker compose -f ros_ws/docker/compose.yaml logs -f
+# With a raw link log in ~/rover-logs (bridge_<date>_<time>.log; ~21 MB per hour):
+#   ROVER_RAW_LOG=/logs/ docker compose -f ros_ws/docker/compose.yaml up -d
+name: rover
+
+services:
+  bridge:
+    build: .
+    image: rover-bridge:jazzy
+    container_name: rover-bridge
+    network_mode: host            # DDS needs the Pi's real interface (group 0)
+    ipc: host                     # Fast DDS shared memory with other containers on the Pi
+    init: true                    # tini as PID 1, so SIGTERM reaches the node
+    restart: unless-stopped       # the node exits on a lost port; this starts it again
+    stop_signal: SIGTERM
+    stop_grace_period: 5s
+    user: "1000:1000"
+    group_add: ["20"]             # dialout: gid 20 on the Pi host and in the image (checked 2026-10-16)
+    devices:
+      - /dev/rover-nucleo:/dev/rover-nucleo     # udev symlink: ros_ws/docker/99-rover-nucleo.rules
+    env_file: ${HOME}/rover.env   # ROS_DOMAIN_ID, ROS_STATIC_PEERS, ... (group 0)
+    environment:
+      PYTHONPATH: /repo/ros_ws/src/rover_bridge:/repo/tools
+      HOME: /tmp
+      ROS_LOG_DIR: /tmp/ros_log
+      RCUTILS_COLORIZED_OUTPUT: "0"
+      PYTHONDONTWRITEBYTECODE: "1"  # the repo is mounted read-only
+    volumes:
+      - ../..:/repo:ro            # the repo checkout, read-only
+      - ${HOME}/rover-logs:/logs  # raw link logs, only when ROVER_RAW_LOG is set (uid 1000 must be able to write)
+      - /run/rover:/run/rover     # battery.json for the host's shutdown watcher, watch.json back (/etc/tmpfiles.d/rover.conf)
+    command:
+      - python3
+      - -m
+      - rover_bridge.node
+      - --ros-args
+      - -p
+      - port:=/dev/rover-nucleo
+      - -p
+      - wait_for_serial:=0673FF535451897067112541   # after a lost port: exit once the board is back
+      - -p
+      - raw_log:=${ROVER_RAW_LOG:-disabled}          # off by default (an empty -p value doesn't parse; 'off' is YAML false)
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # The EKF (ros_ws/src/rover_ekf): /rover/imu/raw, /rover/joint_states, /rover/steering ->
+  # /odom + TF. On the Pi so the 100 Hz inputs stay off Wi-Fi. Builds its package into the
+  # ekf-ws volume when it starts (minutes the first time, seconds after), then runs.
+  #   docker compose -f ros_ws/docker/compose.yaml logs -f ekf
+  ekf:
+    image: rover-bridge:jazzy
+    container_name: rover-ekf
+    depends_on: [bridge]
+    network_mode: host
+    ipc: host
+    init: true
+    restart: unless-stopped
+    stop_signal: SIGINT
+    stop_grace_period: 5s
+    user: "1000:1000"
+    env_file: ${HOME}/rover.env
+    environment:
+      HOME: /tmp
+      ROS_LOG_DIR: /tmp/ros_log
+      RCUTILS_COLORIZED_OUTPUT: "0"
+    volumes:
+      - ../..:/repo:ro
+      - ekf-ws:/ws
+    command: ["bash", "/repo/ros_ws/docker/ekf_start.sh"]
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  ekf-ws:

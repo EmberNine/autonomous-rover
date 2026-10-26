@@ -1,0 +1,4 @@
+# /dev/rover-nucleo -> the rover's Nucleo (ST-LINK/V2-1 virtual COM port, interface 02).
+# Values from `udevadm info -q property -n /dev/ttyACM0` on the Pi, 2026-10-16.
+# Install: docs/ros-bridge.md.
+SUBSYSTEM=="tty", ENV{ID_VENDOR_ID}=="0483", ENV{ID_MODEL_ID}=="374b", ENV{ID_SERIAL_SHORT}=="0673FF535451897067112541", ENV{ID_USB_INTERFACE_NUM}=="02", SYMLINK+="rover-nucleo"

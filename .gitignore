@@ -1,0 +1,44 @@
+# Build output
+build/
+build-*/
+out/
+
+# CMake cruft (in case of an in-source build)
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CTestTestfile.cmake
+Testing/
+_deps/
+compile_commands.json
+install_manifest.txt
+
+# Editors / IDEs
+.vscode/
+# ...except the firmware's: the STM32Cube extensions need it to build/flash/debug
+!firmware/.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.cache/
+.clangd/
+.claude/settings.local.json
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Local secrets / environment
+.env
+*.pem
+
+# colcon (ROS 2) build output
+ros_ws/build/
+ros_ws/install/
+ros_ws/log/
+
+# Python bytecode cache
+__pycache__/
+*.pyc
+.pytest_cache/
